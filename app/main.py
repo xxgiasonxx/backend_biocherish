@@ -1,9 +1,12 @@
-from logging import logging
+import logging
 
 from fastapi import FastAPI
 
-from app.exceptions.main import exceptions
-from app.middleware.response import add_process_time_header
+from app.exceptions import exceptions
+from app.middlewares.response import middlewares
+from app.routes.router import router
+from starlette.middleware.cors import CORSMiddleware
+from app.core.db import on_startup
 
 # initlize logging
 logging.basicConfig(
@@ -14,24 +17,31 @@ logging.basicConfig(
 # initlize app
 bio_app = FastAPI(title="Bioinformatics API", version="1.0.0")
 
+
 # middleware
 bio_app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-bio_app.middleware("http")(add_process_time_header)
+
+for mware in middlewares:
+    bio_app.middleware("http")(mware)
 
 for cls, fn in exceptions:
-    bio_app.exception_handler(cls), fn)
+    bio_app.exception_handler(cls)(fn)
 
 # include routers
 prefix = "/api/v1"
 bio_app.include_router(router, prefix=prefix)
 
+
+bio_app.add_event_handler("startup", on_startup)
+
+
 # Health check endpoint
-@bio_app.get("/health", tags=["Health"])
-async def health_check():
-    return {"status": "ok"}
+# @bio_app.get("/health", tags=["Health"])
+# async def health_check():
+#     return {"status": "ok"}

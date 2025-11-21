@@ -1,13 +1,22 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.routes.api.login import login_app
+from app.lib.auth import require_user
+from app.routes.api.auth import auth
+from app.routes.api.bottle import bottle
+
+
 
 router = APIRouter()
 
 router.include_router(
-    prefix="/users",
-    tags=["users"],
-    router=login_app,
+    prefix="/auth",
+    tags=["auth"],
+    router=auth,
 )
 
-
+router.include_router(
+    prefix="/bottle",
+    tags=["bottle"],
+    router=bottle,
+    dependencies=[Depends(require_user)],
+)

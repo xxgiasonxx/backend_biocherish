@@ -1,0 +1,15 @@
+version: '3.9'
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: biocherish_user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: biocherish_db
+    ports:
+      - 5432:5432
+    volumes:
+      - db_data:/var/lib/postgresql/data
+  
+volumes:
+  db_data:

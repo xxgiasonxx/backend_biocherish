@@ -1,47 +1,78 @@
 import datetime
+from jose import jwt, JWTError
+from app.core.config import Settings
+from fastapi import Depends, HTTPException, status, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials 
+from uuid import uuid4
+from app.core.config import get_settings
+from app.core.db import db_dep
 
-import jwt
-from fastapi import APIRouter, HTTPException, Request
+oauth2_scheme = HTTPBearer()
+settings = get_settings()
 
-from app.core.config import Settings, get_settings
-from app.exceptions.UserException import credentialsException
 
-login_app = APIRouter()
+def generate_access_token(userId: str):
+    return jwt.encode(
+        {
+            "user_id": userId,
+            "exp": datetime.datetime.utcnow()
+            + datetime.timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES),
+        },
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+    
+def generate_refresh_token(userId: str):
+    return jwt.encode(
+        {
+            "user_id": userId,
+            "jti": str(uuid4()),
+            "exp": datetime.datetime.utcnow()
+            + datetime.timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS),
+        },
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM,
+    )
 
-JWT_SECRET_KEY = settings.JWT_SECRET_KEY
-JWT_ALGORITHM = settings.JWT_ALGORITHM
-JWT_EXPIRATION_MINUTES = settings.JWT_EXPIRATION_MINUTES
-
-def create_access_token(data: dict, expires_delta: timedelta | None = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRATION_MINUTES)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
-    return encoded_jwt
-
-def verify_token(token: str):
+def verify_jwt_token(token: str):
     try:
-        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
-        return payload
-    except jwt.ExpiredSignatureError:
-        raise UnAuthorizedException(status_code=401, detail="Token has expired")
-    except jwt.InvalidTokenError:
-        raise UnAuthorizedException(status_code=401, detail="Invalid token")
-
-
-async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
-    try:
-        payload = verify_token(token)
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentialsException()
+        return jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
     except JWTError:
-        raise credentialsException()
+        return None
 
-    # need to add database call to get user
-    if user is None:
-        raise credentialsException()
-    return user
+def verify_password(hashed_password: str, plain_password: str) -> bool:
+    from argon2 import PasswordHasher
+    ph = PasswordHasher()
+    try:
+        ph.verify(hashed_password, plain_password)
+        return True
+    except:
+        return False
+
+def hash_password(plain_password: str) -> str:
+    from argon2 import PasswordHasher
+    ph = PasswordHasher()
+    return ph.hash(plain_password)
+
+
+def require_user(token: HTTPAuthorizationCredentials = Depends(oauth2_scheme)):
+    try:
+        payload = verify_jwt_token(token.credentials)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if payload.get("jti", None) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return payload
