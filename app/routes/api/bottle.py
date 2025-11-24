@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse
+from sqlmodel import select
 
 from app.core.db import db_dep
 from app.lib.auth import require_user
-from app.models.bottle import BottleHistory, BottleMainInfo
+from app.models.bottle import Bottle, BottleScan, BottleHistory, BottleMainInfo, BottleLastInfo
 
 bottle = APIRouter()
 
@@ -105,3 +106,51 @@ def get_bottle_history(bottle_id: int, start: int, end: int, db: db_dep, user=De
         content={"history": res_ar},
     )
 
+@bottle.get("/{bottle_id}/history/{history_id}")
+def get_bottle_history_detail(bottle_id: int, history_id: int, db: db_dep, user=Depends(require_user)):
+    user_id = user.get("user_id", None)
+    if not user_id:
+        return JSONResponse(
+            status_code=401,
+            content={"message": "Unauthorized"},
+        )
+
+    bottle = db.exec(
+        select(Bottle).where(Bottle.id == bottle_id, Bottle.user_id == user_id)
+    ).first()
+
+    if not bottle:
+        return JSONResponse(
+            status_code=404,
+            content={"message": "Bottle not found"},
+        )
+
+    scan = db.exec(
+        select(BottleScan).where(BottleScan.id == history_id, BottleScan.bottle_id == bottle_id)
+    ).first()
+
+    if not scan:
+        return JSONResponse(
+            status_code=404,
+            content={"message": "History not found"},
+        )
+
+    res_bottle = BottleLastInfo(
+        id=scan.id,
+        name=scan.name,
+        image_path=scan.image.image_path if scan.image else None,
+        ai_image_path=scan.image.ai_image_path if scan.image else None,
+        state=scan.state,
+        description=scan.description,
+        suggestion=scan.suggestion,
+        temperature=scan.temperature,
+        humidity=scan.humidity,
+        scanned_at=scan.scanned_at,
+    )
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "bottle_history": res_bottle.dict()
+        },
+    )
