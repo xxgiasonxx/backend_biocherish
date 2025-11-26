@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import List, Optional, Literal
 from uuid import UUID, uuid4
+from fastapi import UploadFile
 
 from sqlmodel import Field, SQLModel, Relationship, Column
 from sqlalchemy import TIMESTAMP, text
@@ -12,7 +13,7 @@ class Bottle(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: UUID = Field(foreign_key="user.id", nullable=False, index=True)
     name: str = Field(index=True, nullable=False)
-    fequency: int = Field(default=0, nullable=False) # in minutes
+    # fequency: int = Field(default=0, nullable=False) # in minutes
 
     curr_image_id: Optional[int] = Field(default=None, foreign_key="bottleimage.id", nullable=True)
     curr_state: int = Field(default=0, nullable=False)
@@ -83,7 +84,8 @@ class BottleImage(SQLModel, table=True):
 class BottleDevice(SQLModel, table=True):
     device_id: UUID = Field(primary_key=True, default_factory=uuid4)
     bottle_id: UUID = Field(foreign_key="bottle.id", nullable=False)
-    is_connected: bool = Field(default=True, nullable=False)
+    frequency: int = Field(default=60, nullable=False)  # in minutes
+    is_connected: bool = Field(default=False, nullable=False)
     is_error: bool = Field(default=False, nullable=False)
     error_message: Optional[str] = Field(default=None, nullable=True)
     edited_at: datetime = Field(sa_column=Column(
@@ -122,3 +124,13 @@ class BottleHistory(SQLModel):
     state: State
     scanned_at: datetime
     detail: str
+
+class CreateBottle(SQLModel):
+    name: str
+    frequency: int  # in minutes
+    
+class UpdateBottle(SQLModel):
+    token: str
+    image: UploadFile
+    temperature: Optional[float]
+    humidity: Optional[float]

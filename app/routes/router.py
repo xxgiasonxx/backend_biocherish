@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.lib.auth import require_user
 from app.routes.api.auth import auth
 from app.routes.api.bottle import bottle
+from app.routes.api.device import device
 
 
 
@@ -19,4 +20,10 @@ router.include_router(
     tags=["bottle"],
     router=bottle,
     dependencies=[Depends(require_user)],
+)
+
+router.include_router(
+    prefix="/device",
+    tags=["device"],
+    router=device,
 )

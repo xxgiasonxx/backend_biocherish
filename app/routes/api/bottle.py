@@ -4,7 +4,9 @@ from sqlmodel import select
 
 from app.core.db import db_dep
 from app.lib.auth import require_user
-from app.models.bottle import Bottle, BottleScan, BottleHistory, BottleMainInfo, BottleLastInfo
+from uuid import uuid4
+from app.models.bottle import Bottle, BottleScan, BottleHistory, BottleMainInfo, BottleLastInfo, CreateBottle, BottleDevice
+from app.lib.device import generate_device_token
 
 bottle = APIRouter()
 
@@ -154,3 +156,49 @@ def get_bottle_history_detail(bottle_id: int, history_id: int, db: db_dep, user=
             "bottle_history": res_bottle.dict()
         },
     )
+
+@bottle.post("/newBottle")
+def create_new_bottle(form_data: CreateBottle, db: db_dep, user=Depends(require_user)):
+    user_id = user.get("user_id", None)
+    if not user_id:
+        return JSONResponse(
+            status_code=401,
+            content={"message": "Unauthorized"},
+        )
+
+    if not form_data.name or form_data.name.strip() == "":
+        return JSONResponse(
+            status_code=400,
+            content={"message": "Bottle name is required"},
+        )
+
+    bottle_device_id = uuid4()
+
+    bottle = Bottle(
+        user_id=user_id,
+        name=form_data.name,
+        device_id=bottle_device_id
+    )
+
+    bottle_device = BottleDevice(
+        device_id=bottle_device_id,
+        bottle_id=bottle.id,
+        frequency=form_data.frequency,  # default frequency 60 minutes
+    )
+
+    db.add(bottle)
+    db.add(bottle_device)
+    db.commit()
+    db.refresh(bottle)
+
+    token_device_id = generate_device_token(bottle_device_id, bottle.id)
+
+    return JSONResponse(
+        status_code=201,
+        content={
+            "device_token": token_device_id
+        },
+    )
+
+
+    
