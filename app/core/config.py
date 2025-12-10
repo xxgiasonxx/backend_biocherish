@@ -1,9 +1,10 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
-from pydantic import (
-    Field
-)
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from . import config
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -20,6 +21,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = Field(validation_alias="DATABASE_URL")
     DEVICE_JWT_SECRET_KEY: str = Field(validation_alias="DEVICE_JWT_SECRET_KEY")
     DEVICE_JWT_ALGORITHM: str = Field(validation_alias="DEVICE_JWT_ALGORITHM", default="HS256")
+    UPLOAD_DIRECTORY: str = Field(validation_alias="UPLOAD_DIRECTORY", default="./uploads")
 
 
 @lru_cache

@@ -1,17 +1,21 @@
-from jose import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import RedirectResponse, JSONResponse
-import requests
 # from google.auth.transport import requests
 # from google.oauth2 import id_token
 import datetime
-from app.core.config import get_settings, Settings
-from app.core.db import db_dep
-from app.models.user import User, UserLogin, UserRegister, VerfiyData, AccessToken
-from sqlmodel import select, update
-from app.exceptions import CredentialsException
-from app.lib.auth import generate_access_token, generate_refresh_token, verify_jwt_token, verify_password, hash_password
 import logging
+
+import requests
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse, RedirectResponse
+from jose import jwt
+from sqlmodel import select, update
+
+from app.core.config import Settings, get_settings
+from app.core.db import db_dep
+from app.exceptions import CredentialsException
+from app.lib.auth import (generate_access_token, generate_refresh_token,
+                          hash_password, verify_jwt_token, verify_password)
+from app.models.user import (AccessToken, User, UserLogin, UserRegister,
+                             VerfiyData)
 
 logger = logging.getLogger(__name__)
 

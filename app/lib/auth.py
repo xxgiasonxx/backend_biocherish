@@ -1,10 +1,11 @@
 import datetime
-from jose import jwt, JWTError
-from app.core.config import Settings
-from fastapi import Depends, HTTPException, status, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials 
 from uuid import uuid4
-from app.core.config import get_settings
+
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
+
+from app.core.config import Settings, get_settings
 from app.core.db import db_dep
 
 oauth2_scheme = HTTPBearer()
@@ -68,6 +69,14 @@ def require_user(token: HTTPAuthorizationCredentials = Depends(oauth2_scheme)):
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     if payload.get("jti", None) is not None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
