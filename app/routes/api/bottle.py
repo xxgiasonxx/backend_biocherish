@@ -2,44 +2,52 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse
-from sqlmodel import select
+from boto3.dynamodb.conditions import Key, Attr
+from typing import Optional
 
-from app.core.db import db_dep
+from app.core.db import dynamodb
 from app.lib.auth import require_user
 from app.lib.device import generate_device_token
-from app.models.bottle import (Bottle, BottleDevice, BottleHistory,
-                               BottleLastInfo, BottleMainInfo, BottleScan,
-                               CreateBottle)
+# table
+from app.models.bottle import Bottle, DeviceSet
+# models
+from app.models.bottle import BottleLastInfo, BottleMainInfo, BottleHistory, CreateBottle
 
 bottle = APIRouter()
 
+bottle_table = dynamodb.Table("bottle")
+deviceset_table = dynamodb.Table("deviceset")
+detect_record_table = dynamodb.Table("detect_record")
+detect_record_state_table = dynamodb.Table("detect_record_state")
+
 
 @bottle.get("/")
-def get_bottle(db: db_dep, user=Depends(require_user)):
+def get_bottle(user=Depends(require_user)):
     user_id = user.get("user_id", None)
     if not user_id:
         return JSONResponse(
             status_code=401,
             content={"message": "Unauthorized"},
         )
-    bottles = db.exec(
-        select(Bottle)
-        .where(Bottle.user_id == user_id)
-    ).all()
-
+    bottles = bottle_table.query(
+        IndexName="UserIdIndex",
+        KeyConditionExpression=Key('user_id').eq(user_id),
+    ).get("Items", [])
 
     res_ar = []
 
     for bottle in bottles:
-        res_ar.append(BottleMainInfo(
-            id=str(bottle.id),
-            name=bottle.name,
-            status=bottle.curr_status,
-            bottle_status=bottle.curr_bottle_status,
-            image=bottle.curr_image_path,
-            edited_at=str(bottle.edited_at),
-            scanned_at=str(bottle.scanned_at),
-        ).dict())
+        res_ar.append(
+            BottleMainInfo(
+                id=str(bottle['id']),
+                name=bottle['name'],
+                status=bottle['curr_status'],
+                bottle_status=bottle['curr_bottle_status'],
+                image=bottle['curr_image_path'],
+                edited_at=bottle['edited_at'],
+                scanned_at=bottle['scanned_at'],
+            ).dict()
+        )
 
     return JSONResponse(
         status_code=200,
@@ -47,11 +55,11 @@ def get_bottle(db: db_dep, user=Depends(require_user)):
     )
 
 @bottle.get("/{bottle_id}")
-def get_bottle_info(bottle_id: UUID, db: db_dep):
+def get_bottle_info(bottle_id: UUID):
 
-    bottle = db.exec(
-        select(Bottle).where(Bottle.id == bottle_id)
-    ).first()
+    bottle = bottle_table.get_item(
+        Key={"id": str(bottle_id)}
+    ).get("Item", None)
 
     if not bottle:
         return JSONResponse(
@@ -59,9 +67,13 @@ def get_bottle_info(bottle_id: UUID, db: db_dep):
             content={"message": "Bottle not found"},
         )
 
-    last_bottle = db.exec(
-        select(BottleScan).where(BottleScan.bottle_id == bottle_id).order_by(BottleScan.scanned_at.desc())
-    ).first()
+    last_bottle = detect_record_table.query(
+        IndexName='BottleIdIndex',
+        KeyConditionExpression=Key('bottle_id').eq(str(bottle_id)),
+        ScanIndexForward=False,
+        Limit=1
+    ).get("Items", [])
+    last_bottle = last_bottle[0] if last_bottle else None
 
     if not last_bottle:
         return JSONResponse(
@@ -69,18 +81,25 @@ def get_bottle_info(bottle_id: UUID, db: db_dep):
             content={"message": "No scans found for this bottle"},
         )
 
+    bottle_state = detect_record_state_table.get_item(
+        Key={"detect_record_state_id": last_bottle.bottleStateID}
+    ).get("Item", None)
+
+    if not bottle_state:
+        return JSONResponse(
+            status_code=404,
+            content={"message": "Bottle state not found"},
+        )
 
     res_bottle = BottleLastInfo(
-        id=last_bottle.id,
-        name=bottle.name,
-        image_path=last_bottle.image.image_path,
-        ai_image_path=last_bottle.image.ai_image_path,
-        status=last_bottle.bottle_status,
-        description=last_bottle.description,
-        suggestion=last_bottle.suggestion,
+        id=last_bottle.detect_record_id,
+        image_path=last_bottle.orgPhotoUrl,
+        ai_image_path=last_bottle.aiPhotoUrl,
+        status=bottle_state.type,
+        suggestion=bottle_state.advice,
         temperature=last_bottle.temperature,
         humidity=last_bottle.humidity,
-        scanned_at=str(last_bottle.scanned_at),
+        scanned_at=str(last_bottle.time),
     )
 
     return JSONResponse(
@@ -92,7 +111,7 @@ def get_bottle_info(bottle_id: UUID, db: db_dep):
 
 
 @bottle.get("/{bottle_id}/history")
-def get_bottle_history(bottle_id: int, start: int, end: int, db: db_dep, user=Depends(require_user)):
+def get_bottle_history(bottle_id: UUID, limit: int, next_key: Optional[str] = None, user=Depends(require_user)):
     user_id = user.get("user_id", None)
     if not user_id:
         return JSONResponse(
@@ -100,9 +119,18 @@ def get_bottle_history(bottle_id: int, start: int, end: int, db: db_dep, user=De
             content={"message": "Unauthorized"},
         )
 
-    bottle = db.exec(
-        select(Bottle).where(Bottle.id == bottle_id, Bottle.user_id == user_id)
-    ).first()
+    if limit <= 0 or limit > 100:
+        return JSONResponse(
+            status_code=400,
+            content={"message": "Invalid range"},
+        )
+
+    bottle = bottle_table.query(
+        IndexName='UserIdIndex',
+        KeyConditionExpression=Key('user_id').eq(str(user_id)),
+        FilterExpression=Attr('id').eq(str(bottle_id))
+    ).get("Items", [])
+    bottle = bottle[0] if bottle else None
 
     if not bottle:
         return JSONResponse(
@@ -110,27 +138,41 @@ def get_bottle_history(bottle_id: int, start: int, end: int, db: db_dep, user=De
             content={"message": "Bottle not found"},
         )
 
-    scans = db.exec(
-        select(BottleScan).where(BottleScan.bottle_id == bottle_id).order_by(BottleScan.scanned_at.desc()).offset(start).limit(end - start)
-    ).all()
+    scans_param = {
+        'IndexName': 'BottleIdIndex',
+        'KeyConditionExpression': Key('bottle_id').eq(str(bottle_id)),
+        'ScanIndexForward': False,
+        'Limit': limit,
+    }
+
+    if next_key:
+        scans_param['ExclusiveStartKey'] = {"detect_record_id": int(next_key)}
+
+    scans = detect_record_table.query(**scans_param)
+
+    next_key_res = scans.get("LastEvaluatedKey", None)
+    scans = scans.get("Items", [])
 
     res_ar = []
 
     for scan in scans:
         res_ar.append(BottleHistory(
-            id=scan.id,
+            id=scan.detect_record_id,
             status=scan.bottle_status,
             scanned_at=scan.scanned_at,
-            details="/bottle/{}/history/{}".format(bottle_id, scan.id)
+            details="/bottle/{}/history/{}".format(bottle_id, scan.detect_record_id)
         ).dict())
 
     return JSONResponse(
         status_code=200,
-        content={"history": res_ar},
+        content={
+            "history": res_ar,
+            "next_key": next_key_res
+        },
     )
 
 @bottle.get("/{bottle_id}/history/{history_id}")
-def get_bottle_history_detail(bottle_id: int, history_id: int, db: db_dep, user=Depends(require_user)):
+def get_bottle_history_detail(bottle_id: UUID, history_id: int, user=Depends(require_user)):
     user_id = user.get("user_id", None)
     if not user_id:
         return JSONResponse(
@@ -138,9 +180,12 @@ def get_bottle_history_detail(bottle_id: int, history_id: int, db: db_dep, user=
             content={"message": "UnauthorizeUploadFiled"},
         )
 
-    bottle = db.exec(
-        select(Bottle).where(Bottle.id == bottle_id, Bottle.user_id == user_id)
-    ).first()
+    bottle = bottle_table.query(
+        IndexName='UserIdIndex',
+        KeyConditionExpression=Key('user_id').eq(str(user_id)),
+        FilterExpression=Attr('id').eq(str(bottle_id))
+    ).get("Items", [])
+    bottle = bottle[0] if bottle else None
 
     if not bottle:
         return JSONResponse(
@@ -148,9 +193,22 @@ def get_bottle_history_detail(bottle_id: int, history_id: int, db: db_dep, user=
             content={"message": "Bottle not found"},
         )
 
-    scan = db.exec(
-        select(BottleScan).where(BottleScan.id == history_id, BottleScan.bottle_id == bottle_id)
-    ).first()
+    scan = detect_record_table.query(
+        IndexName='BottleIdIndex',
+        KeyConditionExpression=Key('bottle_id').eq(str(bottle_id)),
+        FilterExpression=Key('detect_record_id').eq(history_id),
+    ).get("Items", [])
+    scan = scan[0] if scan else None
+    
+    if not scan:
+        return JSONResponse(
+            status_code=404,
+            content={"message": "History not found"},
+        )
+
+    state = detect_record_state_table.get_item(
+        Key={"detect_record_state_id": scan.bottleStateID}
+    ).get("Item", None)
 
     if not scan:
         return JSONResponse(
@@ -159,13 +217,11 @@ def get_bottle_history_detail(bottle_id: int, history_id: int, db: db_dep, user=
         )
 
     res_bottle = BottleLastInfo(
-        id=scan.id,
-        name=scan.name,
-        image_path=scan.image.image_path if scan.image else None,
-        ai_image_path=scan.image.ai_image_path if scan.image else None,
-        state=scan.state,
-        description=scan.description,
-        suggestion=scan.suggestion,
+        id=scan.detect_record_id,
+        image_path=scan.origPhotoUrl,
+        ai_image_path=scan.aiPhotoUrl,
+        state=state.type,
+        suggestion=state.advice,
         temperature=scan.temperature,
         humidity=scan.humidity,
         scanned_at=scan.scanned_at,
@@ -179,7 +235,7 @@ def get_bottle_history_detail(bottle_id: int, history_id: int, db: db_dep, user=
     )
 
 @bottle.post("/newBottle")
-def create_new_bottle(form_data: CreateBottle, db: db_dep, user=Depends(require_user)):
+def create_new_bottle(form_data: CreateBottle, user=Depends(require_user)):
     user_id = user.get("user_id", None)
     if not user_id:
         return JSONResponse(
@@ -193,9 +249,11 @@ def create_new_bottle(form_data: CreateBottle, db: db_dep, user=Depends(require_
             content={"message": "Bottle name is required"},
         )
     #check if bottle name is already in database for this user
-    existing_bottle = db.exec(
-        select(Bottle).where(Bottle.user_id == user_id, Bottle.name == form_data.name)
-    ).first()
+    existing_bottle = bottle_table.query(
+        IndexName="UserIdIndex",
+        KeyConditionExpression=Key('user_id').eq(user_id),
+        FilterExpression=Attr('name').eq(form_data.name)
+    ).get("Items", [])
 
     if existing_bottle:
         return JSONResponse(
@@ -203,24 +261,25 @@ def create_new_bottle(form_data: CreateBottle, db: db_dep, user=Depends(require_
             content={"message": "Bottle name already exists"},
         )
 
-    bottle_device_id = uuid4()
+    bottle_device_id = str(uuid4())
 
     bottle = Bottle(
-        user_id=user_id,
+        id=str(uuid4()),
+        user_id=str(user_id),
         name=form_data.name,
         device_id=bottle_device_id,
     )
 
-    bottle_device = BottleDevice(
-        bottle_id=bottle.id,
-        frequency=form_data.frequency,  # default frequency 60 minutes
+    bottle_device = DeviceSet(
         device_id=bottle_device_id,
+        bottle_id=bottle.id,
+        user_id=user_id,
+        detectFreq=form_data.frequency,
+        name=form_data.name,
     )
 
-    db.add(bottle)
-    db.add(bottle_device)
-    db.commit()
-    db.refresh(bottle)
+    bottle_table.put_item(Item=bottle.dict())
+    deviceset_table.put_item(Item=bottle_device.dict())
 
     token_device_id = generate_device_token(bottle_device_id, bottle.id)
 

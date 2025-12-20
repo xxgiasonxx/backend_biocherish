@@ -1,11 +1,10 @@
 from datetime import datetime
 from enum import Enum
-from typing import List, Literal, Optional
-from uuid import UUID, uuid4
+from typing import Optional
+from uuid import UUID
 
 from fastapi import UploadFile
-from sqlalchemy import DateTime, func
-from sqlmodel import Column, Field, Relationship, SQLModel
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 
 # Enum
@@ -23,134 +22,92 @@ class Status(str, Enum):
 
 
 # database models
-class Bottle(SQLModel, table=True):
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    user_id: UUID = Field(foreign_key="user.id", nullable=False, index=True)
-    name: str = Field(index=True, nullable=False)
+class Bottle(BaseModel):
+    id: str
+    user_id: str
+    name: str
+    # name: str = Field(index=True, nullable=False)
     # fequency: int = Field(default=0, nullable=False) # in minutes
 
-    curr_image_path: Optional[str] = Field(default=None, nullable=True)
-    curr_bottle_status: BottleStatus = Field(default=BottleStatus.UNKNOWN, nullable=False)
-    curr_status: Status = Field(default=Status.PENDING, nullable=False)
+    curr_image_path: Optional[str] = None
+    curr_bottle_status: BottleStatus = BottleStatus.UNKNOWN
+    curr_status: Status = Status.PENDING
 
-    device_id: UUID = Field(foreign_key="bottledevice.device_id", nullable=False)
-    device: "BottleDevice" = Relationship(
-        back_populates="bottle",
-        sa_relationship_kwargs={"uselist": False}
-    )
+    device_id: str
 
-    history: List["BottleScan"] = Relationship(back_populates="bottle")
+    scanned_at: int = int(datetime.now().timestamp())
+    edited_at: int = int(datetime.now().timestamp())
+    updated_at: int = int(datetime.now().timestamp())
+    created_at: int = int(datetime.now().timestamp())
 
-    scanned_at: datetime = Field(
-        sa_column=Column(
-            DateTime(timezone=True),
-            nullable=False,
-            server_default=func.now(),
-        )
-    )
-    edited_at: datetime = Field(
-        sa_column=Column(
-            DateTime(timezone=True),
-            nullable=False,
-            server_default=func.now(),
-        )
-    )
-    created_at: datetime = Field(
-        sa_column=Column(
-            DateTime(timezone=True),
-            nullable=False,
-            server_default=func.now(),
-        )
+    model_config = ConfigDict(
+        validate_assignment=True,
     )
 
+    @model_validator(mode="after")
+    @classmethod
+    def update_updated_at(cls, obj: "Bottle") -> "Bottle":
+        """Update updated_at field."""
+        # must disable validation to avoid infinite loop
+        obj.model_config["validate_assignment"] = False
 
+        # update updated_at field
+        obj.updated_at = int(datetime.now().timestamp())
 
-class BottleScan(SQLModel, table=True):
-    id: int = Field(default=None, primary_key=True)
-    bottle_id: UUID = Field(foreign_key="bottle.id", nullable=False, index=True)
-    status: Status = Field(default=Status.PENDING, nullable=False)
-    bottle_status: BottleStatus = Field(default=BottleStatus.UNKNOWN, nullable=False)
-    description: str = Field(default="", nullable=True)
-    suggestion: str = Field(default="", nullable=True)
-    temperature: float = Field(default=0.0, nullable=True)
-    humidity: float = Field(default=0.0, nullable=True)
-    image_id: int = Field(foreign_key="bottleimage.id", nullable=False)
-    bottle: Bottle = Relationship(back_populates="history")
-    image: "BottleImage" = Relationship(back_populates="bottle_scans") # image_path: Optional[str] = Field(default=None, nullable=True) ai_image_path: Optional[str] = Field(default=None, nullable=True)
+        # enable validation again
+        obj.model_config["validate_assignment"] = True
+        return obj
 
-    scanned_at: datetime = Field(
-        sa_column=Column(
-            DateTime(timezone=True),
-            nullable=False,
-            server_default=func.now(),
-        )
-    )
-    created_at: datetime = Field(
-        sa_column=Column(
-            DateTime(timezone=True),
-            nullable=False,
-            server_default=func.now(),
-        )
-    )
+class DeviceSet(BaseModel):
+    device_id: str
+    bottle_id: str
+    user_id: str
+    detectFreq: int = 30  # in minutes
+    name: str
+    isError: bool = False
+    isConnected: bool = False
+    endpoint: Optional[str] = None
+    certificate: Optional[str] = None
+    privateKey: Optional[str] = None
 
-class BottleImage(SQLModel, table=True):
-    id: int = Field(default=None, primary_key=True)
-    image_path: str = Field(nullable=True)
-    ai_image_path: str = Field(nullable=True)
-    bottle_scans: BottleScan = Relationship(back_populates="image")
-    ai_gen_at: datetime = Field(
-        sa_column=Column(
-            DateTime(timezone=True),
-            nullable=False,
-            server_default=func.now(),
-        )
-    )
-    created_at: datetime = Field(
-        sa_column=Column(
-            DateTime(timezone=True),
-            nullable=False,
-            server_default=func.now(),
-        )
-    )
+    lastEditTime: int = int(datetime.now().timestamp())
+    createTime: int = int(datetime.now().timestamp())
 
+class DetectRecord(BaseModel):
+    detect_record_id: str
+    bottleStateID: str
+    # envStateID: int 
+    device_id: str = Field(foreign_key="deviceset.device_id", nullable=False)
+    bottle_id: str
+    isFromDevice: bool = True
+    orgPhotoUrl: Optional[str] = None
+    aiPhotoUrl: Optional[str] = None
+    temperature: Optional[float] = None
+    humidity: Optional[float] = None
+    isError: bool = False
+    time: int = int(datetime.now().timestamp())
 
-class BottleDevice(SQLModel, table=True):
-    device_id: UUID = Field(primary_key=True, default_factory=uuid4)
-    bottle: "Bottle" = Relationship(
-        back_populates="device",
-        sa_relationship_kwargs={"uselist": False}
-    )
-    frequency: int = Field(default=60, nullable=False)  # in minutes
-    is_connected: bool = Field(default=False, nullable=False)
-    is_error: bool = Field(default=False, nullable=False)
-    error_message: Optional[str] = Field(default=None, nullable=True)
-    edited_at: datetime = Field(
-        sa_column=Column(
-            DateTime(timezone=True),
-            nullable=False,
-            server_default=func.now(),
-        )
-    )
-    created_at: datetime = Field(
-        sa_column=Column(
-            DateTime(timezone=True),
-            nullable=False,
-            server_default=func.now(),
-        )
-    )
+class DetectRecordState(BaseModel):
+    detect_record_state_id: str
+    isAbnormal: bool = False
+    type: int = 0
+    advice: Optional[str] = None
+    bottleOrEnv: Optional[int] = None
+    createTime: int = int(datetime.now().timestamp())
+
 
 
 # interface models
-class BottleMainInfo(SQLModel):
+class BottleMainInfo(BaseModel):
     id: str
     name: str
     status: Status
     bottle_status: BottleStatus
     image: Optional[str]
-    edited_at: str
-    scanned_at: str
+    edited_at: int
+    scanned_at: int
 
-class BottleLastInfo(SQLModel):
+class BottleLastInfo(BaseModel):
     id: str
     name: str
     image_path: Optional[str]
@@ -160,19 +117,19 @@ class BottleLastInfo(SQLModel):
     suggestion: str
     temperature: float
     humidity: float
-    scanned_at: str
+    scanned_at: int
 
-class BottleHistory(SQLModel):
+class BottleHistory(BaseModel):
     id: int
     status: Status
     detail: str
-    scanned_at: str
+    scanned_at: int
 
-class CreateBottle(SQLModel):
+class CreateBottle(BaseModel):
     name: str
     frequency: int  # in minutes
 
-class UpdateBottle(SQLModel):
+class UpdateBottle(BaseModel):
     token: str
     image: UploadFile
     temperature: Optional[float]

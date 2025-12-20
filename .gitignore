@@ -11,3 +11,11 @@ wheels/
 
 # environment variables
 .env
+
+# db
+*.db
+
+# image files
+*.png
+*.jpg
+*.jpeg
