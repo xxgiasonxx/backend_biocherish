@@ -1,44 +1,42 @@
 from typing import Optional
 from uuid import UUID, uuid4
-from sqlmodel import SQLModel, Field
-from pydantic import EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 
 
-class TokenRequest(SQLModel):
+class TokenRequest(BaseModel):
     id_token: str
     
-class AccessToken(SQLModel, table=True):
-    id: UUID = Field(default_factory=uuid4, primary_key=True)
-    user_id: UUID = Field(index=True)
-    refresh_token: str = Field(nullable=False)
-    access_token: str = Field(nullable=False)
-    refresh_at: datetime = Field(default_factory=datetime.utcnow)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    # revoked: bool = Field(default=False)
+class AccessToken(BaseModel):
+    id: str
+    user_id: str
+    refresh_token: str
+    token_version: int = 0
+    created_at: int = int(datetime.now().timestamp())
 
-class UserBase(SQLModel):
-    id: UUID = Field(default_factory=lambda: uuid4(), unique=True, primary_key=True)
-    Email: EmailStr = Field(unique=True, index=True, max_length=255)
-    Username: str = Field(index=True, nullable=False)
-    Password: Optional[str] = Field(default=None, nullable=True)
-    Google_ID: Optional[str] = Field(default=None, index=True, nullable=True)
-    
-class User(UserBase, table=True):
-    disabled: bool = Field(default=False, nullable=False)
+class UserBase(BaseModel):
+    id: str
+    Email: EmailStr = Field(max_length=255)
+    Username: str
+    Password: Optional[str] = None
+    Google_ID: str = "None"
 
+class User(UserBase):
+    disabled: bool = False
+    token_version: int = 0
+    created_at: int = int(datetime.now().timestamp())
 
-class UserLogin(SQLModel):
+class UserLogin(BaseModel):
     Email: EmailStr
     Password: str
 
-class UserRegister(SQLModel):
+class UserRegister(BaseModel):
     Email: EmailStr
     Username: str
     Password: str
     RePassword: str
 
-class VerfiyData(SQLModel):
+class VerfiyData(BaseModel):
     token: str
     
 

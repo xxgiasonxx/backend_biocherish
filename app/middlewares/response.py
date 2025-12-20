@@ -32,7 +32,7 @@ async def add_timestamp_to_json_response(request: Request, call_next):
             data = raw_data  # 如果解析失敗就不改
         # 加 timestamp
         if isinstance(data, dict):
-            data["timestamp"] = datetime.datetime.utcnow().isoformat()
+            data["timestamp"] = int(datetime.datetime.utcnow().timestamp())
         # 回傳新 response
         response = JSONResponse(content=data, status_code=response.status_code)
     

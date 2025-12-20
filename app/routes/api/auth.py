@@ -1,22 +1,33 @@
-from jose import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import RedirectResponse, JSONResponse
-import requests
 # from google.auth.transport import requests
 # from google.oauth2 import id_token
 import datetime
-from app.core.config import get_settings, Settings
-from app.core.db import db_dep
-from app.models.user import User, UserLogin, UserRegister, VerfiyData, AccessToken
-from sqlmodel import select, update
-from app.exceptions import CredentialsException
-from app.lib.auth import generate_access_token, generate_refresh_token, verify_jwt_token, verify_password, hash_password
 import logging
+
+import requests
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse, RedirectResponse
+from uuid import uuid4
+from boto3.dynamodb.conditions import Key, Attr
+
+from app.core.config import Settings, get_settings
+from app.core.db import dynamodb
+from app.exceptions import CredentialsException
+from app.lib.auth import (generate_access_token, generate_refresh_token,
+                          hash_password, verify_jwt_token, verify_password)
+from app.models.user import (AccessToken, User, UserLogin, UserRegister,
+                             VerfiyData)
 
 logger = logging.getLogger(__name__)
 
 
+TOKEN_URL = "https://oauth2.googleapis.com/token"
+USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
+
 auth = APIRouter()
+
+# db
+user_table = dynamodb.Table("user")
+access_table = dynamodb.Table("access_token")
 
 
 @auth.get("/google/login")
@@ -35,13 +46,12 @@ def google_login(settings: Settings = Depends(get_settings)):
         status_code=status.HTTP_200_OK,
         content={
             "url": url,
-            "timestamp": datetime.datetime.utcnow().isoformat()
         }
     )
     # return RedirectResponse(url)
 
 @auth.get("/google/callback")
-def google_callback(code: str, db: db_dep, settings: Settings = Depends(get_settings)):
+def google_callback(code: str, settings: Settings = Depends(get_settings)):
     # 用 code 換 token
     data = {
         "code": code,
@@ -50,44 +60,56 @@ def google_callback(code: str, db: db_dep, settings: Settings = Depends(get_sett
         "redirect_uri": settings.GOOGLE_REDIRECT_URI,
         "grant_type": "authorization_code"
     }
-    TOKEN_URL = "https://oauth2.googleapis.com/token"
     token_res = requests.post(TOKEN_URL, data=data)
     if token_res.status_code != status.HTTP_200_OK:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to obtain token from Google")
 
     tokens = token_res.json()
-    access_token = tokens["access_token"]
+    access_token = tokens.get("access_token", "")
 
     # 取得使用者資訊
-    USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
     userinfo_res = requests.get(USERINFO_URL, headers={
         "Authorization": f"Bearer {access_token}"
     })
     userinfo = userinfo_res.json()
     username = userinfo.get("name", userinfo["email"].split("@")[0])
 
-    user = db.exec(select(User).where(User.Google_ID == userinfo["sub"])).first()
+    user = user_table.query(
+        IndexName='GoogleIDIndex',
+        KeyConditionExpression=Key('Google_ID').eq(userinfo["sub"]),
+        FilterExpression=Attr('disabled').eq(False)
+    ).get("Items", [])
+    user = user[0] if user else None
     if not user:
         # 自動註冊
         user = User(
+            id=str(uuid4()),
             Email=userinfo["email"],
             Username=username,
             Google_ID=userinfo["sub"],
             Password=None
         )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        user_table.put_item(Item=user.dict())
+    id = user.get("id") if isinstance(user, dict) else user.id
 
-    access_token = generate_access_token(userId=str(user.id))
-    refresh_token = generate_refresh_token(userId=str(user.id))
+    access_token = generate_access_token(userId=str(id))
+    refresh_token = generate_refresh_token(userId=str(id))
 
-    db.add(AccessToken(
-        user_id=user.id,
-        refresh_token=refresh_token,
-        access_token=access_token,
-    )) 
-    db.commit()
+    new_token_version = user_table.update_item(
+        Key={"id": id},
+        UpdateExpression="SET token_version = token_version + :inc",
+        ExpressionAttributeValues={":inc": 1},
+        ReturnValues="UPDATED_NEW"
+    )["Attributes"]["token_version"]
+
+    access_table.put_item(
+        Item=AccessToken(
+            id=str(uuid4()),
+            user_id=id,
+            refresh_token=refresh_token,
+            token_version=new_token_version,
+        ).dict()
+    )
 
     return JSONResponse(
         status_code=status.HTTP_200_OK,
@@ -99,15 +121,17 @@ def google_callback(code: str, db: db_dep, settings: Settings = Depends(get_sett
     )
 
 @auth.post("/refresh")
-def verify_token(form_data: VerfiyData, db: db_dep, settings: Settings = Depends(get_settings)):
+def verify_token(form_data: VerfiyData, settings: Settings = Depends(get_settings)):
     token = form_data.token
     if not token:
         raise CredentialsException(msg="Invalid refresh token")
 
-    find_r = db.exec(
-        select(AccessToken).where(AccessToken.refresh_token == token)
-    ).first()
+    find_r = access_table.query(
+        IndexName='refreshTokenIndex',
+        KeyConditionExpression=Key('refresh_token').eq(token),
+    ).get("Items", [])
 
+    find_r = find_r[0] if find_r else None
     if not find_r:
         raise CredentialsException(msg="Refresh token not found")
 
@@ -116,19 +140,31 @@ def verify_token(form_data: VerfiyData, db: db_dep, settings: Settings = Depends
         raise CredentialsException(msg="Token has expired")
 
     user_id = payload.get("user_id")
+
+    user = user_table.get_item(Key={"id": user_id}).get("Item")
+
+    if user['token_version'] != find_r['token_version']:
+        raise CredentialsException(msg="Refresh token has been revoked")
+
+    # generate new tokens
     refresh_token = generate_refresh_token(userId=user_id)
     access_token = generate_access_token(userId=user_id)
 
-    db.exec(
-        update(AccessToken)
-        .where(AccessToken.user_id == user_id)
-        .values(
+    new_token_version = user_table.update_item(
+        Key={"id": user_id},
+        UpdateExpression="SET token_version = token_version + :inc",
+        ExpressionAttributeValues={":inc": 1},
+        ReturnValues="UPDATED_NEW"
+    )["Attributes"]["token_version"]
+
+    access_table.put_item(
+        Item=AccessToken(
+            id=str(uuid4()),
+            user_id=user_id,
             refresh_token=refresh_token,
-            access_token=access_token,
-            refresh_at=datetime.datetime.now(datetime.timezone.utc),
-        )
+            token_version=new_token_version,
+        ).dict()
     )
-    db.commit()
 
     return JSONResponse(
         status_code=status.HTTP_200_OK,
@@ -141,31 +177,46 @@ def verify_token(form_data: VerfiyData, db: db_dep, settings: Settings = Depends
 
 
 @auth.post("/login")
-def login(form_data: UserLogin, db: db_dep, settings: Settings = Depends(get_settings)):
+def login(form_data: UserLogin, settings: Settings = Depends(get_settings)):
     email = form_data.Email
     password = form_data.Password
 
     if not email or not password:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email and password are required")
 
-    user = db.exec(select(User).where(User.Email == email)).first()
+    user = user_table.query(
+        IndexName='EmailIndex',
+        KeyConditionExpression=Key('Email').eq(email),
+        FilterExpression=Key('disabled').eq(False)
+    ).get("Items", [])
 
+    user = user[0] if user else None
     if not user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User not found")
 
-    if not verify_password(user.Password, password):
+    if not verify_password(user['Password'], password):
         raise CredentialsException(msg="Invalid email or password")
 
-    # generate Token
-    access_token = generate_access_token(userId=str(user.id))
-    refresh_token = generate_refresh_token(userId=str(user.id))
+    id = user['id']
 
-    db.add(AccessToken(
-        user_id=user.id,
-        refresh_token=refresh_token,
-        access_token=access_token,
-    ))
-    db.commit()
+    # generate Token
+    access_token = generate_access_token(userId=str(id))
+    refresh_token = generate_refresh_token(userId=str(id))
+    new_token_version = user_table.update_item(
+        Key={"id": id},
+        UpdateExpression="SET token_version = token_version + :inc",
+        ExpressionAttributeValues={":inc": 1},
+        ReturnValues="UPDATED_NEW"
+    )["Attributes"]["token_version"]
+
+    access_table.put_item(
+        Item=AccessToken(
+            id=str(uuid4()),
+            user_id=id,
+            refresh_token=refresh_token,
+            token_version=new_token_version,
+        ).dict()
+    )
 
     return JSONResponse(
         status_code=status.HTTP_200_OK,
@@ -177,7 +228,7 @@ def login(form_data: UserLogin, db: db_dep, settings: Settings = Depends(get_set
     )
 
 @auth.post("/register")
-def register(form_data: UserRegister, db: db_dep, settings: Settings = Depends(get_settings)):
+def register(form_data: UserRegister, settings: Settings = Depends(get_settings)):
     email = form_data.Email
     username = form_data.Username
     password = form_data.Password
@@ -195,7 +246,11 @@ def register(form_data: UserRegister, db: db_dep, settings: Settings = Depends(g
         )
 
     # check if user exists
-    existing_user = db.exec(select(User).where(User.Email == email)).first()
+    existing_user = user_table.query(
+        IndexName='EmailIndex',
+        KeyConditionExpression=Key('Email').eq(email)
+    ).get("Items", [])
+
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="User already exists"
@@ -204,10 +259,14 @@ def register(form_data: UserRegister, db: db_dep, settings: Settings = Depends(g
     # password hash
     hashed_password = hash_password(password)
 
-    new_user = User(Email=email, Username=username, Password=hashed_password)
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    new_user = User(
+        id=str(uuid4()),
+        Email=email,
+        Username=username,
+        Password=hashed_password,
+        disabled=False,
+    )
+    user_table.put_item(Item=new_user.dict())
 
     return JSONResponse(
         status_code=status.HTTP_201_CREATED,
@@ -218,17 +277,18 @@ def register(form_data: UserRegister, db: db_dep, settings: Settings = Depends(g
     )
 
 @auth.post("/logout")
-def logout(form_data: VerfiyData, db: db_dep):
+def logout(form_data: VerfiyData):
     payload = verify_jwt_token(form_data.token)
     if not payload:
         raise CredentialsException(msg="Invalid token")
 
     user_id = payload.get("user_id")
 
-    db.exec(
-        select(AccessToken).where(AccessToken.user_id == user_id).delete()
+    user_table.update_item(
+        Key={"id": user_id},
+        UpdateExpression="SET token_version = token_version + :inc",
+        ExpressionAttributeValues={":inc": 1},
     )
-    db.commit()
 
     return JSONResponse(
         status_code=status.HTTP_200_OK,
