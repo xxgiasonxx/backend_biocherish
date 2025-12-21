@@ -111,14 +111,13 @@ def google_callback(code: str, settings: Settings = Depends(get_settings)):
         ).dict()
     )
 
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content={
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer",
-        },
+    redirect_url = (
+        f"{settings.FRONTEND_URL}/--/SignInSuccess?"
+        f"access_token={access_token}&"
+        f"refresh_token={refresh_token}"
     )
+
+    return RedirectResponse(redirect_url)
 
 @auth.post("/refresh")
 def verify_token(form_data: VerfiyData, settings: Settings = Depends(get_settings)):
