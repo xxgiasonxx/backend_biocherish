@@ -9,10 +9,9 @@ from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 # Enum
 class BottleStatus(int, Enum):
-    UNKNOWN = 0
-    GOOD = 1
-    CAREFUL = 2
-    WARNING = 3
+    UNKNOWN = 2
+    GOOD = 0
+    WARNING = 1
 
 class Status(str, Enum):
     PENDING = "pending"
@@ -101,27 +100,43 @@ class DetectRecordState(BaseModel):
 class BottleMainInfo(BaseModel):
     id: str
     name: str
-    status: Status
     bottle_status: BottleStatus
-    image: Optional[str]
+    bottle_status_text: str
+    env_status: BottleStatus
+    env_status_text: str
+    isConnected: bool
+    imageurl: Optional[str]
     edited_at: int
     scanned_at: int
 
-class BottleLastInfo(BaseModel):
-    id: str
+class BottleDetailInfo(BaseModel):
+    bottle_status: BottleStatus
+    bottle_status_text: str
+    bottle_desc: Optional[str] = None
+    
+class EnvDetailInfo(BaseModel):
+    env_status: BottleStatus
+    env_status_text: str
+    env_desc: Optional[str] = None
+
+class DisplayState(BaseModel):
+    temperature: Optional[float] = None
+    humidity: Optional[float] = None
+    time: int
+
+class BottleSingleInfo(BaseModel):
+    detect_state_id: str
     name: str
-    image_path: Optional[str]
-    ai_image_path: Optional[str]
-    status: Status
-    description: str
-    suggestion: str
-    temperature: float
-    humidity: float
-    scanned_at: int
+    displayState: EnvDetailInfo
+    bottleState: BottleDetailInfo
+    envState: DisplayState
+    oriimageUri: Optional[str]
+    AIimageUri: Optional[str]
 
 class BottleHistory(BaseModel):
     id: int
-    status: Status
+    status: BottleStatus
+    status_text: str
     detail: str
     scanned_at: int
 

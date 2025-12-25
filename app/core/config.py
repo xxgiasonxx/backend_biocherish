@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     DEVICE_JWT_ALGORITHM: str = Field(validation_alias="DEVICE_JWT_ALGORITHM", default="HS256")
     UPLOAD_DIRECTORY: str = Field(validation_alias="UPLOAD_DIRECTORY", default="./uploads")
     FRONTEND_URL: str = Field(validation_alias="FRONTEND_URL", default="http://localhost:3000")
+    DATA_URL: str = Field(validation_alias="DATA_URL", default="http://localhost:8000/data")
 
 
 @lru_cache

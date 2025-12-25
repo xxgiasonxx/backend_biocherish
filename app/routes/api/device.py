@@ -8,6 +8,7 @@ import datetime
 
 from app.core.config import Settings, get_settings
 from app.core.db import dynamodb
+from app.lib.data import get_device_info, update_device_info
 from app.lib.device import verify_device_token, generate_device_token
 from app.lib.auth import require_user
 # table
@@ -16,9 +17,7 @@ from app.models.bottle import UpdateBottle
 
 device = APIRouter()
 
-detect_record_table = dynamodb.Table("detect_record")
-detect_record_state_table = dynamodb.Table("detect_record_state")
-device_set_table = dynamodb.Table("deviceset")
+bottle_table = dynamodb.Table("bottle")
 
 @device.post("/getAllDeviceToken")
 def get_all_device_token(user=Depends(require_user)):
@@ -46,91 +45,63 @@ def get_all_device_token(user=Depends(require_user)):
         content={"devices": tokens},
     )
 
-@device.post("/update")
-def update_bottle_info(token: str, file: UploadFile, temperature: Optional[float] = None, humidity: Optional[float] = None, settings: Settings = Depends(get_settings)):
-    if not token:
+@device.post("/getDevice")
+def get_device(bottle_id: str, name: str, user=Depends(require_user), settings: Settings = Depends(get_settings)):
+    user_id = user.get("user_id", None)
+    if not user_id:
         return JSONResponse(
             status_code=401,
-            content={"message": "Unauthorized: Missing token"},
+            content={"message": "Unauthorized"},
         )
-    token = verify_device_token(token)
-
-    if not token:
-        return JSONResponse(
-            status_code=401,
-            content={"message": "Unauthorized: Invalid token"},
-        )
-
-    device_id = token.get("device_id")
-    bottle_id = token.get("bottle_id")
-
-    if device_id is None or bottle_id is None:
-        return JSONResponse(
-            status_code=401,
-            content={"message": "Unauthorized: Invalid token data"},
-        )
-
-    if not os.path.exists(settings.UPLOAD_DIRECTORY):
-        os.makedirs(settings.UPLOAD_DIRECTORY)
-
-    bottle_folder = os.path.join(settings.UPLOAD_DIRECTORY, str(bottle_id))
-    if not os.path.exists(bottle_folder):
-        os.makedirs(bottle_folder)
-
-    folder_name = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    scan_folder = os.path.join(bottle_folder, folder_name)
-    os.makedirs(scan_folder)
- 
-    if not file:
+    if bottle_id is None or name is None:
         return JSONResponse(
             status_code=400,
-            content={"message": "Bad Request: Missing image file"},
+            content={"message": "device_id and name are required"},
         )
-    if file.content_type not in ["image/jpeg", "image/png"]:
+    bottle = bottle_table.get_item(
+        Key={"id": bottle_id}
+    ).get("Item", None)
+    if not bottle or bottle.get("user_id", None) != user_id:
         return JSONResponse(
-            status_code=400,
-            content={"message": "Bad Request: Invalid image file type"},
-        )
-    if file.size > 5 * 1024 * 1024:
-        return JSONResponse(
-            status_code=400,
-            content={"message": "Bad Request: Image file size exceeds limit"},
+            status_code=404,
+            content={"message": "Bottle not found"},
         )
 
-    try:
-        file_path = os.path.join(scan_folder, f"original_{file.filename}")
-        with open(file_path, "wb") as f:
-            f.write(file.file.read())
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"message": f"Internal Server Error: Failed to save image file. {str(e)}"},
-        )
-
-    detect_record_state_id = str(uuid4())
-    bottlestate = DetectRecordState(
-        detect_record_state_id=detect_record_state_id,
-    )
-    detect_record_state_table.put_item(
-        Item=bottlestate.dict(),
-    )
-
-    bottlescan = DetectRecord(
-        detect_record_id=str(uuid4()),
-        bottleStateID=detect_record_state_id,
-        device_id=device_id,
-        bottle_id=bottle_id,
-        temperature=temperature,
-        humidity=humidity,
-        orgPhotoUrl=file_path,
-    )
-
-    detect_record_table.put_item(
-        Item=bottlescan.dict(),
-    )
+    device_info = get_device_info(bottle.get("device_id", ""), settings)
 
     return JSONResponse(
         status_code=200,
-        content={"message": "Bottle scan data updated successfully"},
+        content={
+            "device_id": device_info.get("device_id", ""),
+            "name": device_info.get("name", ""),
+            "detectFreq": device_info.get("detectFreq", 30),
+        },
     )
 
+@device.put("/updateDevice")
+def update_device(freq: int, name: str, device_id: str, user=Depends(require_user), settings: Settings = Depends(get_settings)):
+    user_id = user.get("user_id", None)
+    if not user_id:
+        return JSONResponse(
+            status_code=401,
+            content={"message": "Unauthorized"},
+        )
+
+    data = {
+        "device_id": device_id,
+        "name": name,
+        "detectFreq": freq,
+    }
+
+    success = update_device_info(data, settings)
+
+    if not success:
+        return JSONResponse(
+            status_code=500,
+            content={"message": "Failed to update device"},
+        )
+
+    return JSONResponse(
+        status_code=200,
+        content={"message": "Device updated successfully"},
+    )
