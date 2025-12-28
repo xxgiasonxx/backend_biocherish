@@ -3,11 +3,12 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse
 from boto3.dynamodb.conditions import Key, Attr
+from datetime import datetime
 from typing import Optional
 
 from app.core.db import dynamodb
 from app.lib.auth import require_user
-from app.lib.data import device_is_connected, find_detect_record, get_bottle_detect_state_history, get_last_detect_record
+from app.lib.data import device_is_connected, find_all_bottle_and_env_state, find_all_detect_record_with_detect_record_state, find_bottle_state, find_detect_record, get_bottle_detect_state_history, get_last_detect_record, split_all_detect_state_history
 from app.lib.device import generate_device_token
 # table
 from app.models.bottle import Bottle, BottleSingleInfo, BottleStatus, DeviceSet, DisplayState, EnvDetailInfo
@@ -81,57 +82,49 @@ def get_bottle_info(bottle_id: UUID, settings: Settings = Depends(get_settings),
             content={"message": "Bottle not found"},
         )
 
-    last_bottle = detect_record_table.query(
-        IndexName='BottleIdIndex',
-        KeyConditionExpression=Key('bottle_id').eq(str(bottle_id)),
-        ScanIndexForward=False,
-        Limit=1
-    ).get("Items", [])
-    last_bottle = last_bottle[0] if last_bottle else None
 
-    last_detect_record = get_last_detect_record(str(bottle_id), settings)
+    last_detect_record = get_last_detect_record(str(bottle['device_id']), settings)
 
-    detect_record_state = last_detect_record.get('detect_record_state', None) if last_detect_record else None
-    env_record_state = last_detect_record.get('env_record_state', None) if last_detect_record else None
+    detect_record_state = last_detect_record.get('detect_record_state', {}) if last_detect_record else {}
+    env_record_state = last_detect_record.get('env_record_state', {}) if last_detect_record else {}
 
-    if not last_bottle:
+
+
+    if not last_detect_record or not last_detect_record.get('detect_record_id', None):
         return JSONResponse(
             status_code=404,
             content={"message": "No scans found for this bottle"},
         )
 
-    if not last_detect_record or not last_detect_record.get('detect_record_state', None):
-        return JSONResponse(
-            status_code=404,
-            content={"message": "Bottle state not found"},
-        )
+    # if not detect_record_state:
+    #     return JSONResponse(
+    #         status_code=404,
+    #         content={"message": "Bottle state not found"},
+    #     )
 
-    if not detect_record_state:
-        return JSONResponse(
-            status_code=404,
-            content={"message": "Bottle state not found"},
-        )
-
-    if not env_record_state:
-        return JSONResponse(
-            status_code=404,
-            content={"message": "Environment state not found"},
-        )
+    # if not env_record_state:
+    #     return JSONResponse(
+    #         status_code=404,
+    #         content={"message": "Environment state not found"},
+    #     )
 
     bt_status = BottleStatus(detect_record_state['isAbnormal']) if detect_record_state else BottleStatus.UNKNOWN
     env_status = BottleStatus(env_record_state['isAbnormal']) if env_record_state else BottleStatus.UNKNOWN
+
+
+    print(detect_record_state)
 
     res_bottle = BottleSingleInfo(
         detect_state_id=last_detect_record['detect_record_id'],
         name=bottle['name'],
         bottleState=BottleDetailInfo(
             bottle_status=bt_status,
-            bottle_status_text=detect_record_state['type'],
+            bottle_status_text=detect_record_state.get('type', 'No Data'),
             bottle_desc=detect_record_state.get('advice', None)
         ),
         envState=EnvDetailInfo(
             env_status=env_status,
-            env_status_text=env_record_state['type'],
+            env_status_text=env_record_state.get('type', 'No Data'),
             env_desc=env_record_state.get('advice', None)
         ),
         displayState=DisplayState(
@@ -170,7 +163,14 @@ def get_bottle_total(bottle_id: UUID, user=Depends(require_user), settings: Sett
             content={"message": "Bottle not found"},
         )
 
-    last_detect_record = get_bottle_detect_state_history(bottle_id=str(bottle_id), s=None, e=None, settings=settings)
+    last_detect_record = get_bottle_detect_state_history(device_id=str(bottle['device_id']), s=0, e=None, settings=settings)
+
+    if len(last_detect_record) == 0:
+        return JSONResponse(
+            status_code=200,
+            content={"total_scans": 0},
+        )
+
 
     if not last_detect_record:
         return JSONResponse(
@@ -181,6 +181,8 @@ def get_bottle_total(bottle_id: UUID, user=Depends(require_user), settings: Sett
     res = {
         "total_scans": len(last_detect_record)
     }
+
+    print(res)
 
     return JSONResponse(
         status_code=200,
@@ -214,28 +216,39 @@ def get_bottle_history(bottle_id: str, s: int, e: int, user=Depends(require_user
             status_code=404,
             content={"message": "Bottle not found"},
         )
-    scans = get_bottle_detect_state_history(str(bottle_id), s, e, settings)
+    scans = get_bottle_detect_state_history(device_id=bottle.get("device_id", ""), s=0, e=None, settings=settings)
+
+    state = find_all_bottle_and_env_state(settings) 
+
+
+    scans = split_all_detect_state_history(scans, s, e, settings)
+
+    print(scans)
+
 
     res_ar = []
 
     for scan in scans:
+        bottle_status = find_bottle_state(state, scan['bottleStateID'])
+        bt_status = BottleStatus(bottle_status['isAbnormal']) if bottle_status else BottleStatus.UNKNOWN
+
         res_ar.append(BottleHistory(
-            id=scan.detect_record_id,
-            status=scan.bottle_status,
-            status_text=scan.bottle_status_text,
-            scanned_at=scan.scanned_at,
-            details=f"/home/{bottle_id}/history/{scan.detect_record_id}"
-        ).dict())
+            id=scan['detect_record_id'],
+            status=bt_status,
+            status_text=bottle_status.get('type', 'No Data') if bottle_status else 'No Data',
+            scanned_at=scan['detectTime'],
+            detail=f"/home/{bottle_id}/history/{str(scan['detect_record_id'])}"
+        ))
 
     return JSONResponse(
         status_code=200,
         content={
-            "history": res_ar,
+            "history": [item.dict() for item in res_ar],
         },
     )
 
 @bottle.get("/{bottle_id}/history/{history_id}")
-def get_bottle_history_detail(bottle_id: str, history_id: int, user=Depends(require_user), settings: Settings = Depends(get_settings)):
+def get_bottle_history_detail(bottle_id: str, history_id: str, user=Depends(require_user), settings: Settings = Depends(get_settings)):
     user_id = user.get("user_id", None)
     if not user_id:
         return JSONResponse(
@@ -256,7 +269,7 @@ def get_bottle_history_detail(bottle_id: str, history_id: int, user=Depends(requ
             content={"message": "Bottle not found"},
         )
 
-    scan = find_detect_record(bottle_id, history_id, settings)
+    scan = find_detect_record(bottle['device_id'], history_id, settings)
     
     if not scan:
         return JSONResponse(
@@ -264,20 +277,20 @@ def get_bottle_history_detail(bottle_id: str, history_id: int, user=Depends(requ
             content={"message": "History not found"},
         )
 
-    detect_record_state = scan.get('detect_record_state', None)
-    env_record_state = scan.get('env_record_state', None)
+    detect_record_state = scan.get('detect_record_state', {})
+    env_record_state = scan.get('env_record_state', {})
 
 
-    if not detect_record_state:
-        return JSONResponse(
-            status_code=404,
-            content={"message": "History not found"},
-        )
-    if not env_record_state:
-        return JSONResponse(
-            status_code=404,
-            content={"message": "History not found"},
-        )
+    # if not detect_record_state:
+    #     return JSONResponse(
+    #         status_code=404,
+    #         content={"message": "History not found"},
+    #     )
+    # if not env_record_state:
+    #     return JSONResponse(
+    #         status_code=404,
+    #         content={"message": "History not found"},
+    #     )
 
     bt_status = BottleStatus(detect_record_state['isAbnormal']) if detect_record_state else BottleStatus.UNKNOWN
     env_status = BottleStatus(env_record_state['isAbnormal']) if env_record_state else BottleStatus.UNKNOWN
@@ -287,12 +300,12 @@ def get_bottle_history_detail(bottle_id: str, history_id: int, user=Depends(requ
         name=bottle['name'],
         bottleState=BottleDetailInfo(
             bottle_status=bt_status,
-            bottle_status_text=detect_record_state['type'],
+            bottle_status_text=detect_record_state.get('type', 'No Data'),
             bottle_desc=detect_record_state.get('advice', None)
         ),
         envState=EnvDetailInfo(
             env_status=env_status,
-            env_status_text=env_record_state['type'],
+            env_status_text=env_record_state.get('type', 'No Data'),
             env_desc=env_record_state.get('advice', None)
         ),
         displayState=DisplayState(

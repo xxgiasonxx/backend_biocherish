@@ -105,7 +105,7 @@ class BottleMainInfo(BaseModel):
     env_status: BottleStatus
     env_status_text: str
     isConnected: bool
-    imageurl: Optional[str]
+    imageurl: Optional[str] = None
     edited_at: int
     scanned_at: int
 
@@ -125,16 +125,16 @@ class DisplayState(BaseModel):
     time: int
 
 class BottleSingleInfo(BaseModel):
-    detect_state_id: str
-    name: str
-    displayState: EnvDetailInfo
+    detect_state_id: Optional[str]
+    name: Optional[str]
+    displayState: DisplayState
     bottleState: BottleDetailInfo
-    envState: DisplayState
+    envState: EnvDetailInfo
     oriimageUri: Optional[str]
     AIimageUri: Optional[str]
 
 class BottleHistory(BaseModel):
-    id: int
+    id: str
     status: BottleStatus
     status_text: str
     detail: str
@@ -149,3 +149,16 @@ class UpdateBottle(BaseModel):
     image: UploadFile
     temperature: Optional[float]
     humidity: Optional[float]
+
+class ManualScanBottle(BaseModel):
+    temperature: Optional[float]
+    humidity: Optional[float]
+
+class GetDeviceInfo(BaseModel):
+    bottle_id: str
+
+class NewDeviceInfo(BaseModel):
+    detectFreq: Optional[int] = 30  # in minutes
+    name: str
+    wifiSSID: str
+    wifiPassword: str

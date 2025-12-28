@@ -22,11 +22,16 @@ class Settings(BaseSettings):
     AWS_REGION: str = Field(validation_alias="AWS_REGION")
     AWS_ACCESS_KEY_ID: str = Field(validation_alias="AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY: str = Field(validation_alias="AWS_SECRET_ACCESS_KEY")
-    DEVICE_JWT_SECRET_KEY: str = Field(validation_alias="DEVICE_JWT_SECRET_KEY")
-    DEVICE_JWT_ALGORITHM: str = Field(validation_alias="DEVICE_JWT_ALGORITHM", default="HS256")
+    DEVICE_SECRET_KEY: str = Field(validation_alias="DEVICE_SECRET_KEY")
+    DEVICE_ALGORITHM: str = Field(validation_alias="DEVICE_ALGORITHM", default="HS256")
     UPLOAD_DIRECTORY: str = Field(validation_alias="UPLOAD_DIRECTORY", default="./uploads")
     FRONTEND_URL: str = Field(validation_alias="FRONTEND_URL", default="http://localhost:3000")
     DATA_URL: str = Field(validation_alias="DATA_URL", default="http://localhost:8000/data")
+    IOT_ENDPOINT: str = Field(validation_alias="IOT_ENDPOINT", default="")
+    IOT_CERT_CA: str = Field(validation_alias="IOT_CERT_CA", default="")
+    IOT_CERT_CRT: str = Field(validation_alias="IOT_CERT_CRT", default="")
+    IOT_PRIVATE_KEY: str = Field(validation_alias="IOT_PRIVATE_KEY", default="")
+    FILE_FOLDER: str = Field(validation_alias="FILE_FOLDER", default="device-files/")
 
 
 @lru_cache
