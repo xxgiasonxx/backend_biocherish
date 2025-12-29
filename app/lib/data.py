@@ -62,7 +62,7 @@ def get_last_detect_record(device_id: str, settings: Settings):
     detect_record = requests.get(f'{settings.DATA_URL}/db/devices/{device_id}/detect_records')
     detect_record = detect_record.json()
     detect_record = detect_record.get("detect_records", [])
-    detect_record = detect_record[0] if detect_record else None
+    detect_record = detect_record[-1] if detect_record else None
 
     if detect_record:
         bottle_state, env_state = find_bottle_and_env_state(detect_record['bottleStateID'], detect_record.get('envStateID', ''), settings)
@@ -198,3 +198,9 @@ def update_device_all_info(device_id: str, name: str, freq: int, endpoint: str, 
     )
     return response.status_code == 200
 
+def manual_device_shot(device_id: str, settings: Settings) -> bool:
+
+    response = requests.post(
+        f'{settings.DATA_URL}/iot/devices/{device_id}/manual_trigger'
+    )
+    return response.status_code == 200

@@ -8,7 +8,7 @@ from typing import Optional
 
 from app.core.db import dynamodb
 from app.lib.auth import require_user
-from app.lib.data import device_is_connected, find_all_bottle_and_env_state, find_all_detect_record_with_detect_record_state, find_bottle_state, find_detect_record, get_bottle_detect_state_history, get_last_detect_record, split_all_detect_state_history
+from app.lib.data import device_is_connected, find_all_bottle_and_env_state, find_all_detect_record_with_detect_record_state, find_bottle_state, find_detect_record, get_bottle_detect_state_history, get_device_info, get_last_detect_record, split_all_detect_state_history
 from app.lib.device import generate_device_token
 # table
 from app.models.bottle import Bottle, BottleSingleInfo, BottleStatus, DeviceSet, DisplayState, EnvDetailInfo
@@ -40,29 +40,33 @@ def get_bottle(user=Depends(require_user), settings: Settings = Depends(get_sett
     res_ar = []
 
     for bottle in bottles:
-        last_detect_record = get_last_detect_record(bottle['id'], settings)
-        detect_record_state = last_detect_record.get('detect_record_state', None) if last_detect_record else None
-        env_record_state = last_detect_record.get('env_record_state', None) if last_detect_record else None
+        last_detect_record = get_last_detect_record(bottle['device_id'], settings)
+        detect_record_state = last_detect_record.get('detect_record_state', {}) if last_detect_record else {}
+        env_record_state = last_detect_record.get('env_record_state', {}) if last_detect_record else {}
 
         bt_status = BottleStatus(detect_record_state['isAbnormal']) if detect_record_state else BottleStatus.UNKNOWN
 
         env_status = BottleStatus(env_record_state['isAbnormal']) if env_record_state else BottleStatus.UNKNOWN
 
-        isConnected = device_is_connected(bottle['device_id'], settings)
+        print("Last Detect Record:", last_detect_record)
+
+        device_info = get_device_info(bottle.get("device_id"), settings)
         
         res_ar.append(
             BottleMainInfo(
                 id=str(bottle['id']),
                 name=bottle['name'],
-                bottle_status=bt_status,
-                bottle_status_text=detect_record_state['type'] if detect_record_state else "No Data",
-                env_status=env_status,
-                env_status_text=env_record_state['type'] if env_record_state else "No Data",
-                isConnected=isConnected,
-                edited_at=int(bottle.get('edited_at', 0)),
-                scanned_at=int(bottle.get('scanned_at', 0)),
+                bottle_status=str(bt_status),
+                bottle_status_text=detect_record_state.get("type", "未知"),
+                env_status=str(env_status),
+                env_status_text=env_record_state.get("type", "未知"),
+                isConnected=device_info.get("isConnected", False),
+                imageurl=last_detect_record.get('origPhotoUrl', None) if last_detect_record else None,
+                edited_at=int(bottle.get('edited_at', 0) * 1000),
+                scanned_at=int(bottle.get('scanned_at', 0) * 1000),
             ).dict()
         )
+    print(res_ar)
 
     return JSONResponse(
         status_code=200,
@@ -118,22 +122,22 @@ def get_bottle_info(bottle_id: UUID, settings: Settings = Depends(get_settings),
         detect_state_id=last_detect_record['detect_record_id'],
         name=bottle['name'],
         bottleState=BottleDetailInfo(
-            bottle_status=bt_status,
-            bottle_status_text=detect_record_state.get('type', 'No Data'),
-            bottle_desc=detect_record_state.get('advice', None)
+            bottle_status=str(bt_status),
+            bottle_status_text=detect_record_state.get('type', '未知'),
+            bottle_desc=detect_record_state.get('advice', "無")
         ),
         envState=EnvDetailInfo(
-            env_status=env_status,
-            env_status_text=env_record_state.get('type', 'No Data'),
-            env_desc=env_record_state.get('advice', None)
+            env_status=str(env_status),
+            env_status_text=env_record_state.get('type', '未知'),
+            env_desc=env_record_state.get('advice', "無")
         ),
         displayState=DisplayState(
             temperature=last_detect_record.get('temperature', None),
             humidity=last_detect_record.get('humidity', None),
-            time=last_detect_record.get('scanned_at', 0)
+            time=int(last_detect_record.get('detectTime', 0) * 1000)
         ),
         oriimageUri=last_detect_record.get('origPhotoUrl', None),
-        AIimageUri=last_detect_record.get('aiPhotoUrl', None)
+        AIimageUri=last_detect_record.get('aiPhotoUrl', None),
     )
 
     return JSONResponse(
@@ -234,9 +238,9 @@ def get_bottle_history(bottle_id: str, s: int, e: int, user=Depends(require_user
 
         res_ar.append(BottleHistory(
             id=scan['detect_record_id'],
-            status=bt_status,
+            status=str(bt_status),
             status_text=bottle_status.get('type', 'No Data') if bottle_status else 'No Data',
-            scanned_at=scan['detectTime'],
+            scanned_at=int(scan['detectTime'] * 1000),
             detail=f"/home/{bottle_id}/history/{str(scan['detect_record_id'])}"
         ))
 
@@ -295,25 +299,27 @@ def get_bottle_history_detail(bottle_id: str, history_id: str, user=Depends(requ
     bt_status = BottleStatus(detect_record_state['isAbnormal']) if detect_record_state else BottleStatus.UNKNOWN
     env_status = BottleStatus(env_record_state['isAbnormal']) if env_record_state else BottleStatus.UNKNOWN
 
+    print("298", scan)
+
     res_bottle = BottleSingleInfo(
         detect_state_id=scan['detect_record_id'],
         name=bottle['name'],
         bottleState=BottleDetailInfo(
-            bottle_status=bt_status,
-            bottle_status_text=detect_record_state.get('type', 'No Data'),
-            bottle_desc=detect_record_state.get('advice', None)
+            bottle_status=str(bt_status),
+            bottle_status_text=detect_record_state.get('type', '未知'),
+            bottle_desc=detect_record_state.get('advice', "無")
         ),
         envState=EnvDetailInfo(
-            env_status=env_status,
-            env_status_text=env_record_state.get('type', 'No Data'),
-            env_desc=env_record_state.get('advice', None)
+            env_status=str(env_status),
+            env_status_text=env_record_state.get('type', '未知'),
+            env_desc=env_record_state.get('advice', "無")
         ),
         displayState=DisplayState(
             temperature=scan.get('temperature', None),
             humidity=scan.get('humidity', None),
-            time=scan.get('scanned_at', 0)
+            time=int(scan.get('detectTime', 0) * 1000)
         ),
-        oriimageUri=scan.get('origPhotoUrl', None),
+        oriimageUri=scan.get('orgPhotoUrl', None),
         AIimageUri=scan.get('aiPhotoUrl', None)
     )
 

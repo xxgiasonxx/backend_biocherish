@@ -12,6 +12,8 @@ class BottleStatus(int, Enum):
     UNKNOWN = 2
     GOOD = 0
     WARNING = 1
+    def __str__(self):
+        return self.name.lower()
 
 class Status(str, Enum):
     PENDING = "pending"
@@ -100,9 +102,9 @@ class DetectRecordState(BaseModel):
 class BottleMainInfo(BaseModel):
     id: str
     name: str
-    bottle_status: BottleStatus
+    bottle_status: str
     bottle_status_text: str
-    env_status: BottleStatus
+    env_status: str
     env_status_text: str
     isConnected: bool
     imageurl: Optional[str] = None
@@ -110,12 +112,12 @@ class BottleMainInfo(BaseModel):
     scanned_at: int
 
 class BottleDetailInfo(BaseModel):
-    bottle_status: BottleStatus
+    bottle_status: str
     bottle_status_text: str
     bottle_desc: Optional[str] = None
     
 class EnvDetailInfo(BaseModel):
-    env_status: BottleStatus
+    env_status: str
     env_status_text: str
     env_desc: Optional[str] = None
 
@@ -135,7 +137,7 @@ class BottleSingleInfo(BaseModel):
 
 class BottleHistory(BaseModel):
     id: str
-    status: BottleStatus
+    status: str
     status_text: str
     detail: str
     scanned_at: int
@@ -162,3 +164,6 @@ class NewDeviceInfo(BaseModel):
     name: str
     wifiSSID: str
     wifiPassword: str
+
+class ManualDeviceShot(BaseModel):
+    device_id: str

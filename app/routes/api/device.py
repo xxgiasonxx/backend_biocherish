@@ -9,12 +9,12 @@ import datetime
 from app.core.config import Settings, get_settings
 from app.core.db import dynamodb
 from app.lib.build_firmware import build_zip, put_data, run_build
-from app.lib.data import create_new_device, find_bottle_and_env_state, get_device_info, get_os_file_content, manual_scan_bottle, update_device_all_info, update_device_info
+from app.lib.data import create_new_device, find_bottle_and_env_state, get_device_info, get_os_file_content, manual_device_shot, manual_scan_bottle, update_device_all_info, update_device_info
 from app.lib.device import generate_device_token
 from app.lib.auth import require_user
 from app.lib.file import download_file_requests, upload_file, upload_file_check
 # table
-from app.models.bottle import Bottle, BottleDetailInfo, BottleSingleInfo, BottleStatus, DetectRecord, DetectRecordState, DisplayState, EnvDetailInfo, GetDeviceInfo, NewDeviceInfo, Status
+from app.models.bottle import Bottle, BottleDetailInfo, BottleSingleInfo, BottleStatus, DetectRecord, DetectRecordState, DisplayState, EnvDetailInfo, GetDeviceInfo, ManualDeviceShot, NewDeviceInfo, Status
 from app.models.bottle import UpdateBottle
 
 device = APIRouter()
@@ -130,14 +130,14 @@ def manual_update(file: UploadFile, temperature: Optional[float] = None, humidit
 
     res_bottle = BottleSingleInfo(
         bottleState=BottleDetailInfo(
-            bottle_status=bt_status,
-            bottle_status_text=detect_record_state['type'],
-            bottle_desc=detect_record_state.get('advice', None)
+            bottle_status=str(bt_status),
+            bottle_status_text=detect_record_state.get('type', "未知"),
+            bottle_desc=detect_record_state.get('advice', "無")
         ),
         envState=EnvDetailInfo(
-            env_status=env_status,
-            env_status_text=env_record_state['type'],
-            env_desc=env_record_state.get('advice', None)
+            env_status=str(env_status),
+            env_status_text=env_record_state.get('type', "未知"),
+            env_desc=env_record_state.get('advice', "無")
         ),
         displayState=DisplayState(
             temperature=temperature,
@@ -253,7 +253,25 @@ async def download_device_firmware_zip(device_id: str, settings: Settings = Depe
         content={"message": "Firmware zip not found"},
     )
 
+@device.post("/manualScan")
+def manual_scan(data: ManualDeviceShot, user=Depends(require_user), settings: Settings = Depends(get_settings)):
+    user_id = user.get("user_id", None)
+    if not user_id:
+        return JSONResponse(
+            status_code=401,
+            content={"message": "Unauthorized"},
+        )
+    try:
+        res = manual_device_shot(data.device_id, settings)
+    except JSONResponse as e:
+        return e
 
-
-
-
+    if not res:
+        return JSONResponse(
+            status_code=500,
+            content={"message": "Failed to trigger manual scan"},
+        )
+    return JSONResponse(
+        status_code=200,
+        content={"message": "Manual scan triggered successfully"},
+    )
