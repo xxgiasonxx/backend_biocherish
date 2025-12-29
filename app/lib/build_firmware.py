@@ -68,15 +68,26 @@ def run_build(device_id: str, secrets_content: str, settings=Settings()):
         f"0x10000 ./build/{SKETCH_NAME}.ino.bin"
     )
 
-    compile_and_merge_cmd = [
-        "docker", "run", "--rm",
-        "-v", f"{os.getcwd()}:/app",
-        DOCKER_IMAGE,
-        "bash", "-c", docker_shell_cmd
-    ]
+    is_running_in_modal = os.environ.get("MODAL_IMAGE_ID") is not None
 
-    print(f"[{device_id}] 正在 Docker 內編譯與合併...")
-    subprocess.run(compile_and_merge_cmd, check=True)
+    if is_running_in_modal:
+        # ☁️ 雲端模式：直接執行指令！
+        # 因為你的 Image 已經安裝了 arduino-cli 和 python3，直接跑就好
+        print("Running native command in Modal...")
+        subprocess.run(docker_shell_cmd, shell=True, check=True)
+
+    else:
+        # 💻 本地模式：使用 Docker
+        # 這保留給你本地開發用
+        compile_and_merge_cmd = [
+            "docker", "run", "--rm",
+            "-v", f"{os.getcwd()}:/app",
+            DOCKER_IMAGE,
+            "bash", "-c", docker_shell_cmd
+        ]
+
+        print(f"[{device_id}] 正在 Docker 內編譯與合併...")
+        subprocess.run(compile_and_merge_cmd, check=True)
 
     # 4. 將產出的檔案從 build 移動到指定的 device-files 目錄
     source_path = os.path.join("build", output_filename)
