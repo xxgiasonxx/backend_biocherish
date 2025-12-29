@@ -2,6 +2,7 @@ import glob
 import os
 import subprocess
 from app.core.config import Settings
+import time
 import shutil
 
 # --- 設定區 ---
@@ -103,32 +104,64 @@ def run_build(device_id: str, secrets_content: str, settings=Settings()):
         return None
 
 def build_zip(device_id: str, secrets_content: str, settings=Settings()):
-    # 0. 準備目標路徑
-    target_dir = os.path.join(settings.FILE_FOLDER, device_id)
-    os.makedirs(target_dir, exist_ok=True)
+    print(f"📦 [Zip] 開始打包程序: Device ID {device_id}")
 
-    # 1. 寫入 secrets.h 到原始碼目錄 (這步沒問題)
-    secrets_file_path = os.path.join(SKETCH_NAME, "secrets.h")
+    original_sketch_path = os.path.abspath(SKETCH_NAME)
+    temp_root = f"/tmp/build_{device_id}"
+    temp_sketch_path = os.path.join(temp_root, SKETCH_NAME)
     
-    with open(secrets_file_path, "w", encoding="utf-8") as f:
-        f.write(secrets_content)
+    output_dir = os.path.join(settings.FILE_FOLDER, device_id)
+    zip_base_name = os.path.join(output_dir, device_id)
 
-    # 2. 壓縮檔案
-    # 產出的檔案會是：device-files/{device_id}/{device_id}.zip
-    # 我們先定義不帶副檔名的路徑，shutil 會自動加 .zip
-    zip_base_name = os.path.join(target_dir, device_id)
-    
-    # shutil.make_archive 參數說明：
-    # base_name: 產出的檔案路徑與檔名
-    # format: "zip"
-    # root_dir: 要被壓縮的資料夾
-    shutil.make_archive(
-        base_name=zip_base_name, 
-        format='zip', 
-        root_dir=os.getcwd(), # 從當前目錄開始找
-        base_dir=SKETCH_NAME   # 只壓縮這個資料夾進去
-    )
+    try:
+        # 1. 清理與複製
+        if os.path.exists(temp_root):
+            shutil.rmtree(temp_root)
+        
+        shutil.copytree(
+            original_sketch_path, 
+            temp_sketch_path,
+            ignore=shutil.ignore_patterns('.git', '.github', '__pycache__', 'build', 'device-files', '*.zip', 'node_modules')
+        )
 
-    final_zip_path = f"{zip_base_name}.zip"
-    print(f"✅ 已將原始碼壓縮至: {final_zip_path}")
-    return os.path.abspath(final_zip_path)
+        # 2. 寫入 secrets.h
+        secrets_file_path = os.path.join(temp_sketch_path, "secrets.h")
+        with open(secrets_file_path, "w", encoding="utf-8") as f:
+            f.write(secrets_content)
+
+        # ==========================================
+        # 🕒 關鍵修正：強制更新檔案時間戳記
+        # ==========================================
+        print("🕒 正在修正檔案時間戳記 (Fixing 1980 timestamp issue)...")
+        # 取得現在時間
+        now = time.time()
+        # 遍歷暫存區所有檔案與資料夾
+        for root, dirs, files in os.walk(temp_sketch_path):
+            for entry in dirs + files:
+                full_path = os.path.join(root, entry)
+                # 將存取時間與修改時間設為「現在」，避開 1970 < 1980 的問題
+                os.utime(full_path, (now, now))
+        # ==========================================
+
+        # 3. 壓縮
+        os.makedirs(output_dir, exist_ok=True)
+
+        shutil.make_archive(
+            base_name=zip_base_name, 
+            format='zip', 
+            root_dir=temp_root, 
+            base_dir=SKETCH_NAME
+        )
+        
+        final_zip_path = f"{zip_base_name}.zip"
+        print(f"✅ [Zip] 打包成功: {final_zip_path}")
+        return os.path.abspath(final_zip_path)
+
+    except Exception as e:
+        print(f"❌ [Zip] 打包失敗: {str(e)}")
+        raise e
+
+    finally:
+        if os.path.exists(temp_root):
+            shutil.rmtree(temp_root)
+            print("🧹 [Zip] 暫存區已清理")
