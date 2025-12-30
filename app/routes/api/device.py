@@ -9,7 +9,7 @@ import datetime
 from app.core.config import Settings, get_settings
 from app.core.db import dynamodb
 from app.lib.build_firmware import build_zip, put_data, run_build
-from app.lib.data import create_new_device, find_bottle_and_env_state, get_device_info, get_os_file_content, manual_device_shot, manual_scan_bottle, update_device_all_info, update_device_info
+from app.lib.data import create_new_device, device_connect_check, find_bottle_and_env_state, get_device_info, get_os_file_content, manual_device_shot, manual_scan_bottle, update_device_all_info, update_device_info
 from app.lib.device import generate_device_token
 from app.lib.auth import require_user
 from app.lib.file import download_file_requests, upload_file, upload_file_check
@@ -274,4 +274,24 @@ def manual_scan(data: ManualDeviceShot, user=Depends(require_user), settings: Se
     return JSONResponse(
         status_code=200,
         content={"message": "Manual scan triggered successfully"},
+    )
+
+@device.get("/{device_id}/connect")
+def check_device_connect(device_id: str, settings: Settings = Depends(get_settings), user=Depends(require_user)):
+    user_id = user.get("user_id", None)
+    if not user_id:
+        return JSONResponse(
+            status_code=401,
+            content={"message": "Unauthorized"},
+        )
+    isConnected = device_connect_check(device_id, settings)
+    if isConnected is None:
+        return JSONResponse(
+            status_code=500,
+            content={"message": "Failed to check device connection"},
+        )
+
+    return JSONResponse(
+        status_code=200,
+        content={"isConnected": isConnected},
     )

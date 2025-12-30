@@ -205,3 +205,12 @@ def manual_device_shot(device_id: str, settings: Settings) -> bool:
     )
     print(response)
     return response.status_code == 200
+
+def device_connect_check(device_id: str, settings: Settings) -> bool:
+    response = requests.get(f'{settings.DATA_URL}/iot/devices/{device_id}/connection')
+    if response.status_code != 200:
+        return False
+    data = response.json()
+    if data.get('message', '') == 'Device is connected':
+        return True
+    return False
