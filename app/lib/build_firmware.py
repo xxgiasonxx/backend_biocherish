@@ -132,15 +132,20 @@ def build_zip(device_id: str, secrets_content: str, settings=Settings()):
         # ==========================================
         # 🕒 關鍵修正：強制更新檔案時間戳記
         # ==========================================
-        print("🕒 正在修正檔案時間戳記 (Fixing 1980 timestamp issue)...")
-        # 取得現在時間
+        print("🕒 正在修正所有檔案與資料夾的時間戳記...")
         now = time.time()
-        # 遍歷暫存區所有檔案與資料夾
+        
+        # 1. 先修正主資料夾本身
+        os.utime(temp_sketch_path, (now, now))
+        
+        # 2. 遍歷修正內容（包含 root 目錄本身）
         for root, dirs, files in os.walk(temp_sketch_path):
-            for entry in dirs + files:
-                full_path = os.path.join(root, entry)
-                # 將存取時間與修改時間設為「現在」，避開 1970 < 1980 的問題
-                os.utime(full_path, (now, now))
+            for item in dirs + files:
+                full_path = os.path.join(root, item)
+                try:
+                    os.utime(full_path, (now, now))
+                except Exception:
+                    pass # 防止極少數權限問題導致中斷
         # ==========================================
 
         # 3. 壓縮

@@ -174,7 +174,7 @@ def get_os_file_content(file_url: str) -> bytes:
     with open(file_url, 'rb') as f:
         content = f.read()
     # 同時移除 Unix (\n) 與 Windows (\r\n) 的換行符號
-    return content.replace(b'\n', b'')
+    return content
     
 
 def update_device_all_info(device_id: str, name: str, freq: int, endpoint: str, CRT: str, PRIVATE: str, settings: Settings) -> bool:
@@ -203,4 +203,5 @@ def manual_device_shot(device_id: str, settings: Settings) -> bool:
     response = requests.post(
         f'{settings.DATA_URL}/iot/devices/{device_id}/manual_trigger'
     )
+    print(response)
     return response.status_code == 200

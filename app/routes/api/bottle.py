@@ -386,3 +386,32 @@ def create_new_bottle(form_data: CreateBottle, user=Depends(require_user)):
 
 
     
+@bottle.delete("/{bottle_id}")
+def delete_bottle(bottle_id: UUID, user=Depends(require_user)):
+    user_id = user.get("user_id", None)
+    if not user_id:
+        return JSONResponse(
+            status_code=401,
+            content={"message": "Unauthorized"},
+        )
+
+    bottle = bottle_table.get_item(
+        Key={"id": str(bottle_id)}
+    ).get("Item", None)
+
+    if not bottle or bottle.get("user_id", None) != user_id:
+        return JSONResponse(
+            status_code=404,
+            content={"message": "Bottle not found"},
+        )
+
+    # delete bottle
+    bottle_table.delete_item(
+        Key={"id": str(bottle_id)}
+    )
+
+
+    return JSONResponse(
+        status_code=200,
+        content={"message": "Bottle deleted successfully"},
+    )
