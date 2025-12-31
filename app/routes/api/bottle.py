@@ -138,6 +138,7 @@ def get_bottle_info(bottle_id: UUID, settings: Settings = Depends(get_settings),
         ),
         oriimageUri=last_detect_record.get('origPhotoUrl', None),
         AIimageUri=last_detect_record.get('aiPhotoUrl', None),
+        isError=last_detect_record.get('isError', False),
     )
 
     return JSONResponse(
@@ -320,7 +321,8 @@ def get_bottle_history_detail(bottle_id: str, history_id: str, user=Depends(requ
             time=int(scan.get('detectTime', 0) * 1000)
         ),
         oriimageUri=scan.get('orgPhotoUrl', None),
-        AIimageUri=scan.get('aiPhotoUrl', None)
+        AIimageUri=scan.get('aiPhotoUrl', None),
+        isError=scan.get('isError', False),
     )
 
     return JSONResponse(

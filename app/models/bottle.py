@@ -134,6 +134,7 @@ class BottleSingleInfo(BaseModel):
     envState: EnvDetailInfo
     oriimageUri: Optional[str]
     AIimageUri: Optional[str]
+    isError: bool = False
 
 class BottleHistory(BaseModel):
     id: str
