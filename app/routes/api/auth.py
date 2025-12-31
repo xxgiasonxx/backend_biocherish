@@ -2,18 +2,20 @@
 # from google.oauth2 import id_token
 import datetime
 import logging
+from urllib.parse import urlencode, urljoin
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from uuid import uuid4
 from boto3.dynamodb.conditions import Key, Attr
+from typing import Optional
 
 from app.core.config import Settings, get_settings
 from app.core.db import dynamodb
 from app.exceptions import CredentialsException
 from app.lib.auth import (generate_access_token, generate_refresh_token,
-                          hash_password, verify_jwt_token, verify_password)
+                          hash_password, require_user, verify_jwt_token, verify_password)
 from app.models.user import (AccessToken, User, UserLogin, UserRegister,
                              VerfiyData)
 
@@ -31,7 +33,9 @@ access_table = dynamodb.Table("access_token")
 
 
 @auth.get("/google/login")
-def google_login(settings: Settings = Depends(get_settings)):
+def google_login(app_redirect_url: Optional[str] = None, settings: Settings = Depends(get_settings)):
+
+    target_state = app_redirect_url if app_redirect_url else settings.FRONTEND_URL
     params = {
         "client_id": settings.GOOGLE_CLIENT_ID,
         "redirect_uri": settings.GOOGLE_REDIRECT_URI,
@@ -39,6 +43,7 @@ def google_login(settings: Settings = Depends(get_settings)):
         "scope": "openid email profile",
         "access_type": "offline",
         "prompt": "consent",
+        "state": target_state,  # <--- 把 App 的動態網址存在這裡
     }
     params_encoded = "&".join([f"{key}={value}" for key, value in params.items()])
     url = "https://accounts.google.com/o/oauth2/v2/auth?" + params_encoded
@@ -51,7 +56,7 @@ def google_login(settings: Settings = Depends(get_settings)):
     # return RedirectResponse(url)
 
 @auth.get("/google/callback")
-def google_callback(code: str, settings: Settings = Depends(get_settings)):
+def google_callback(code: str, state: str = None, settings: Settings = Depends(get_settings)):
     # 用 code 換 token
     data = {
         "code": code,
@@ -111,13 +116,13 @@ def google_callback(code: str, settings: Settings = Depends(get_settings)):
         ).dict()
     )
 
-    redirect_url = (
-        f"{settings.FRONTEND_URL}/--/SignInSuccess?"
-        f"access_token={access_token}&"
-        f"refresh_token={refresh_token}"
-    )
+    base_url = state if state else settings.FRONTEND_URL
+    base_url = base_url.rstrip("/")
 
-    return RedirectResponse(redirect_url)
+    redirect_url = f"{base_url}?access_token={access_token}&refresh_token={refresh_token}"
+
+
+    return RedirectResponse(redirect_url, status_code=302)
 
 @auth.post("/refresh")
 def verify_token(form_data: VerfiyData, settings: Settings = Depends(get_settings)):
@@ -292,4 +297,60 @@ def logout(form_data: VerfiyData):
     return JSONResponse(
         status_code=status.HTTP_200_OK,
         content={"message": "Logged out successfully"},
+    )
+
+
+@auth.get("/userinfo")
+def get_userinfo(user=Depends(require_user)):
+    user_id = user.get("user_id", None)
+    if not user_id:
+        raise CredentialsException(msg="User not found")
+
+    UserItem = user_table.get_item(Key={"id": user_id})
+    UserItem = UserItem.get("Item", None)
+
+    if not UserItem:
+        raise CredentialsException(msg="User not found")
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={
+            "email": UserItem.get('Email', ''),
+            "username": UserItem['Username'],
+        },
+    )
+
+@auth.post("/updateinfo")
+def update_userinfo(form_data: UserRegister, user=Depends(require_user)):
+    user_id = user.get("user_id", None)
+    if not user_id:
+        raise CredentialsException(msg="User not found")
+
+    email = form_data.Email
+    username = form_data.Username
+    password = form_data.Password
+    repassword = form_data.RePassword
+
+    if password != repassword:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passwords do not match",
+        )
+
+    # password hash
+    hashed_password = hash_password(password)
+
+    user_table.update_item(
+        Key={"id": user_id},
+        UpdateExpression="SET Email = :email, Username = :username, Password = :password",
+        ExpressionAttributeValues={
+            ":email": email,
+            ":username": username,
+            ":password": hashed_password,
+        },
+    )
+
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content={"message": "User info updated successfully"},
     )
