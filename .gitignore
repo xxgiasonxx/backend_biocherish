@@ -19,3 +19,8 @@ wheels/
 *.png
 *.jpg
 *.jpeg
+
+# folder
+certs/
+device-files/
+zhen_plus_camera/
