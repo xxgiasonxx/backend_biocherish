@@ -19,6 +19,12 @@ bio_app = FastAPI(title="Bioinformatics API", version="1.0.0")
 
 
 # middleware
+for mware in middlewares:
+    bio_app.middleware("http")(mware)
+
+for cls, fn in exceptions:
+    bio_app.exception_handler(cls)(fn)
+
 bio_app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,11 +33,6 @@ bio_app.add_middleware(
     allow_headers=["*"],
 )
 
-for mware in middlewares:
-    bio_app.middleware("http")(mware)
-
-for cls, fn in exceptions:
-    bio_app.exception_handler(cls)(fn)
 
 # include routers
 prefix = "/api/v1"

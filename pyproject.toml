@@ -8,6 +8,7 @@ dependencies = [
     "argon2-cffi>=25.1.0",
     "boto3>=1.42.12",
     "fastapi[standred]>=0.121.3",
+    "modal>=1.3.0.post1",
     "pydantic-settings>=2.12.0",
     "pydantic[email]>=2.12.4",
     "python-jose[cryptography]>=3.5.0",

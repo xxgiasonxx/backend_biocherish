@@ -9,10 +9,11 @@ from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 # Enum
 class BottleStatus(int, Enum):
-    UNKNOWN = 0
-    GOOD = 1
-    CAREFUL = 2
-    WARNING = 3
+    UNKNOWN = 2
+    GOOD = 0
+    WARNING = 1
+    def __str__(self):
+        return self.name.lower()
 
 class Status(str, Enum):
     PENDING = "pending"
@@ -101,27 +102,44 @@ class DetectRecordState(BaseModel):
 class BottleMainInfo(BaseModel):
     id: str
     name: str
-    status: Status
-    bottle_status: BottleStatus
-    image: Optional[str]
+    bottle_status: str
+    bottle_status_text: str
+    env_status: str
+    env_status_text: str
+    isConnected: bool
+    imageurl: Optional[str] = None
     edited_at: int
     scanned_at: int
 
-class BottleLastInfo(BaseModel):
-    id: str
-    name: str
-    image_path: Optional[str]
-    ai_image_path: Optional[str]
-    status: Status
-    description: str
-    suggestion: str
-    temperature: float
-    humidity: float
-    scanned_at: int
+class BottleDetailInfo(BaseModel):
+    bottle_status: str
+    bottle_status_text: str
+    bottle_desc: Optional[str] = None
+    
+class EnvDetailInfo(BaseModel):
+    env_status: str
+    env_status_text: str
+    env_desc: Optional[str] = None
+
+class DisplayState(BaseModel):
+    temperature: Optional[float] = None
+    humidity: Optional[float] = None
+    time: int
+
+class BottleSingleInfo(BaseModel):
+    detect_state_id: Optional[str]
+    name: Optional[str]
+    displayState: DisplayState
+    bottleState: BottleDetailInfo
+    envState: EnvDetailInfo
+    oriimageUri: Optional[str]
+    AIimageUri: Optional[str]
+    isError: bool = False
 
 class BottleHistory(BaseModel):
-    id: int
-    status: Status
+    id: str
+    status: str
+    status_text: str
     detail: str
     scanned_at: int
 
@@ -134,3 +152,19 @@ class UpdateBottle(BaseModel):
     image: UploadFile
     temperature: Optional[float]
     humidity: Optional[float]
+
+class ManualScanBottle(BaseModel):
+    temperature: Optional[float]
+    humidity: Optional[float]
+
+class GetDeviceInfo(BaseModel):
+    bottle_id: str
+
+class NewDeviceInfo(BaseModel):
+    detectFreq: Optional[int] = 30  # in minutes
+    name: str
+    wifiSSID: str
+    wifiPassword: str
+
+class ManualDeviceShot(BaseModel):
+    device_id: str
