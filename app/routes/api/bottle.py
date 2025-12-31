@@ -234,13 +234,15 @@ def get_bottle_history(bottle_id: str, s: int, e: int, user=Depends(require_user
     res_ar = []
 
     for scan in scans:
+        isError = scan.get('isError', False)
         bottle_status = find_bottle_state(state, scan['bottleStateID'])
         bt_status = BottleStatus(bottle_status['isAbnormal']) if bottle_status else BottleStatus.UNKNOWN
+        bt_status = BottleStatus.WARNING if isError else bt_status
 
         res_ar.append(BottleHistory(
             id=scan['detect_record_id'],
             status=str(bt_status),
-            status_text=bottle_status.get('type', 'No Data') if bottle_status else 'No Data',
+            status_text=bottle_status.get('type', 'No Data') if not isError else "偵測失敗",
             scanned_at=int(scan['detectTime'] * 1000),
             detail=f"/home/{bottle_id}/history/{str(scan['detect_record_id'])}"
         ))

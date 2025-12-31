@@ -41,7 +41,7 @@ def find_bottle_state(state, bottle_id: int):
         if drs['detect_record_state_id'] == bottle_id:
             bottle_state = drs
             return bottle_state
-    return None
+    return {}
 
 
 
